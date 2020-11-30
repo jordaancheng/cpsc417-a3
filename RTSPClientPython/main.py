@@ -1,7 +1,6 @@
 #! /usr/bin/python3
 
 import tkinter as tk
-import Image
 from tkinter import simpledialog, messagebox
 from PIL import ImageTk, Image
 from session import Session, SessionListener

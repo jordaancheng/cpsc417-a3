@@ -1,6 +1,7 @@
 import io, socket
 from threading import Thread
 import _thread
+import socket 
 
 class RTSPException(Exception):
     def __init__(self, response):
@@ -38,15 +39,58 @@ class Connection:
         '''Establishes a new connection with an RTSP server. No message is
 	sent at this point, and no stream is set up.
         '''
+        self.session_id = None
+        self.client_port = 2502
+        self.msg = None
+        self.state = 'INIT'
+        self.cseq = 1
         self.session = session
-
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print(address[0], address[1])
+        addrr = str(address[0])
+        port = int(address[1])
+        self.sock.connect((addrr, port))
+        self.rtpsocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.rtpsocket.bind((addrr, self.client_port))
+        # self.sock.connect
         # TODO
         
+    def listen_rtp(self, port):
+        print("listen_rtp")
+        while(True):
+            data = self.rtpsocket.recv(BUFFER_LENGTH)
+            self.process_rtp_msg(data)
 
+    def process_rtp_msg(self, packet):
+        cc = 0b00001111 & packet[0]
+        m = 0b10000000 & packet[1]
+        m = m >> 6
+        pt = 0b01111111 & packet[1]
+        sq = (packet[2] << 8) + packet[3]
+        tmp_stamp = (packet[4] << 24) + (packet[5] << 16) + (packet[6] << 8) + packet[7]
+        startofpayload = 12 + cc*4
+        payload = packet[startofpayload:]
+        print("payload: ", payload)
+        print("cc: ", cc)
+        print("pt: ", pt)
+        print("m: ", m)
+        print("sq: ", sq)
+        print("tmp_stamp: ", tmp_stamp)
+        self.session.process_frame(pt, m, sq, tmp_stamp, payload)
+        
     def send_request(self, command, include_session=True, extra_headers=None):
         '''Helper function that generates an RTSP request and sends it to the
         RTSP connection.
         '''
+        totalsent = 0
+        MSGLEN = len(command)
+        print("MSGLEN",MSGLEN)
+        while totalsent < MSGLEN:
+            sent = self.sock.send(command[totalsent:])
+            if sent == 0:
+                raise RuntimeError("socket connection broken")
+            totalsent = totalsent + sent
+        print(sent)
         # TODO
 
     def start_rtp_timer(self):
@@ -58,12 +102,11 @@ class Connection:
 	the resulting data. In case of timeout no exception should be
 	thrown.
         '''
-        
+        _thread.start_new_thread( self.listen_rtp, (self.client_port, ) )
         # TODO
 
     def stop_rtp_timer(self):
         '''Stops the thread that reads RTP packets'''
-
         # TODO
 
     def setup(self):
@@ -78,7 +121,19 @@ class Connection:
 	socket should also be defined to timeout after 1 second if no
 	packet is received.
         '''
-
+        if (self.state != 'INIT'):
+            return
+        self.msg = 'SETUP ' + self.session.video_name + ' RTSP/1.0'
+        self.msg += '\n' + 'CSeq:' + str(self.cseq) + '\n' + 'Transport: RTP/UDP; client_port= ' + str(self.client_port) + '\n\n' 
+        print(self.msg) 
+        self.send_request(self.msg.encode())
+        response = self.process_recvd_msg()
+        if(response is None):
+            return
+        self.session_id = response.session_id
+        print(response.session_id)
+        self.state = 'READY'
+        print("state = READY")
         # TODO
 
     def play(self):
@@ -87,7 +142,15 @@ class Connection:
 	successful response, starting the RTP timer responsible for
 	receiving RTP packets with frames.
         '''
-
+        if (self.state != 'READY'):
+            return
+        self.start_rtp_timer()
+        self.cseq += 1
+        self.msg = 'PLAY ' + self.session.video_name + ' RTSP/1.0'
+        self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
+        self.send_request(self.msg.encode())
+        print("state = PLAYING")
+        self.state = 'PLAYING'
         # TODO
 
     def pause(self):
@@ -96,6 +159,14 @@ class Connection:
 	successful response, cancelling the RTP thread responsible for
 	receiving RTP packets with frames.
         '''
+        if (self.state != 'PLAYING'):
+            return
+        self.cseq += 1
+        self.msg = 'PAUSE ' + self.session.video_name + ' RTSP/1.0'
+        self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
+        self.send_request(self.msg.encode())
+        print("state = READY")
+        self.state = 'READY'
 
         # TODO
 
@@ -109,6 +180,14 @@ class Connection:
 	timer responsible for receiving RTP packets will also be
 	cancelled.
         '''
+        if (self.state != 'PLAYING' and self.state != 'READY'):
+            return
+        self.cseq += 1
+        self.msg = 'TEARDOWN ' + self.session.video_name + ' RTSP/1.0'
+        self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
+        self.send_request(self.msg.encode())
+        print("state = INIT")
+        self.state = 'INIT'
 
         # TODO
 
@@ -117,6 +196,22 @@ class Connection:
 	close any open resource associated to this connection, such as
 	the RTP connection, if it is still open.
         '''
-
+        self.rtpsocket.shutdown(socket.SHUT_RDWR)
+        self.rtpsocket.close()
         # TODO
-        
+
+    def process_recvd_msg(self):
+        chunk = self.sock.recv(1024)
+        msgbuff = io.StringIO(chunk.decode("utf-8"))
+        print(chunk)
+        response = Response(msgbuff)
+        print("cseq", self.cseq)
+        print("response.cseq", response.cseq)
+        if (self.cseq != response.cseq):
+            return None
+        if (self.session_id is not None and self.session_id == response.session_id):
+            return response
+        elif (self.session_id is None):
+            return response
+        else:
+            return None
