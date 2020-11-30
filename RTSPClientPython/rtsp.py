@@ -43,7 +43,7 @@ class Connection:
         self.client_port = 2502
         self.msg = None
         self.state = 'INIT'
-        self.cseq = 1
+        self.cseq = 0
         self.session = session
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         print(address[0], address[1])
@@ -51,14 +51,18 @@ class Connection:
         port = int(address[1])
         self.sock.connect((addrr, port))
         self.rtpsocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.rtpsocket.bind((addrr, self.client_port))
+        self.end_rtp_conn = False
         # self.sock.connect
         # TODO
         
     def listen_rtp(self, port):
         print("listen_rtp")
-        while(True):
-            data = self.rtpsocket.recv(BUFFER_LENGTH)
+        while(not self.end_rtp_conn):
+            print("LISTENING ON: ", self.rtpsocket.getsockname()[1])
+            try:
+                data = self.rtpsocket.recv(Connection.BUFFER_LENGTH)
+            except:
+                pass
             self.process_rtp_msg(data)
 
     def process_rtp_msg(self, packet):
@@ -103,6 +107,7 @@ class Connection:
 	thrown.
         '''
         _thread.start_new_thread( self.listen_rtp, (self.client_port, ) )
+        print("END OF THREAD")
         # TODO
 
     def stop_rtp_timer(self):
@@ -123,9 +128,14 @@ class Connection:
         '''
         if (self.state != 'INIT'):
             return
+        self.cseq += 1
+        self.rtpsocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.rtpsocket.bind(('localhost', 0))
+        self.client_port =self.rtpsocket.getsockname()[1]
         self.msg = 'SETUP ' + self.session.video_name + ' RTSP/1.0'
         self.msg += '\n' + 'CSeq:' + str(self.cseq) + '\n' + 'Transport: RTP/UDP; client_port= ' + str(self.client_port) + '\n\n' 
-        print(self.msg) 
+
+        print(self.msg)
         self.send_request(self.msg.encode())
         response = self.process_recvd_msg()
         if(response is None):
@@ -144,6 +154,7 @@ class Connection:
         '''
         if (self.state != 'READY'):
             return
+        self.end_rtp_conn = False
         self.start_rtp_timer()
         self.cseq += 1
         self.msg = 'PLAY ' + self.session.video_name + ' RTSP/1.0'
@@ -188,7 +199,9 @@ class Connection:
         self.send_request(self.msg.encode())
         print("state = INIT")
         self.state = 'INIT'
-
+        self.cseq = 1 
+        self.rtpsocket.close()
+        self.end_rtp_conn = True
         # TODO
 
     def close(self):
@@ -196,8 +209,9 @@ class Connection:
 	close any open resource associated to this connection, such as
 	the RTP connection, if it is still open.
         '''
-        self.rtpsocket.shutdown(socket.SHUT_RDWR)
+        self.sock.close()
         self.rtpsocket.close()
+        self.end_rtp_conn = True
         # TODO
 
     def process_recvd_msg(self):
