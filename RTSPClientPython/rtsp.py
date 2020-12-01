@@ -2,6 +2,7 @@ import io, socket
 from threading import Thread
 import _thread
 import socket 
+import time
 
 class RTSPException(Exception):
     def __init__(self, response):
@@ -39,6 +40,9 @@ class Connection:
         '''Establishes a new connection with an RTSP server. No message is
 	sent at this point, and no stream is set up.
         '''
+        self.num_pkts = 0
+        self.time_start = 0
+        self.time_end = 0
         self.session_id = None
         self.client_port = 2502
         self.msg = None
@@ -52,20 +56,25 @@ class Connection:
         self.sock.connect((addrr, port))
         self.rtpsocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.end_rtp_conn = False
+        self.sq = 0
         # self.sock.connect
         # TODO
         
     def listen_rtp(self, port):
+        prev_time = self.time_start
         print("listen_rtp")
         while(not self.end_rtp_conn):
             print("LISTENING ON: ", self.rtpsocket.getsockname()[1])
             try:
                 data = self.rtpsocket.recv(Connection.BUFFER_LENGTH)
+                print("tmp_lapsed: ", (time.time()-prev_time)*1000)
+                prev_time = time.time()
             except:
                 pass
             self.process_rtp_msg(data)
 
     def process_rtp_msg(self, packet):
+        self.num_pkts += 1
         cc = 0b00001111 & packet[0]
         m = 0b10000000 & packet[1]
         m = m >> 6
@@ -74,11 +83,7 @@ class Connection:
         tmp_stamp = (packet[4] << 24) + (packet[5] << 16) + (packet[6] << 8) + packet[7]
         startofpayload = 12 + cc*4
         payload = packet[startofpayload:]
-        print("payload: ", payload)
-        print("cc: ", cc)
-        print("pt: ", pt)
-        print("m: ", m)
-        print("sq: ", sq)
+        self.sq = sq
         print("tmp_stamp: ", tmp_stamp)
         self.session.process_frame(pt, m, sq, tmp_stamp, payload)
         
@@ -143,7 +148,6 @@ class Connection:
         self.session_id = response.session_id
         print(response.session_id)
         self.state = 'READY'
-        print("state = READY")
         # TODO
 
     def play(self):
@@ -152,6 +156,7 @@ class Connection:
 	successful response, starting the RTP timer responsible for
 	receiving RTP packets with frames.
         '''
+        self.time_start = time.time()
         if (self.state != 'READY'):
             return
         self.end_rtp_conn = False
@@ -160,7 +165,6 @@ class Connection:
         self.msg = 'PLAY ' + self.session.video_name + ' RTSP/1.0'
         self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
         self.send_request(self.msg.encode())
-        print("state = PLAYING")
         self.state = 'PLAYING'
         # TODO
 
@@ -170,15 +174,17 @@ class Connection:
 	successful response, cancelling the RTP thread responsible for
 	receiving RTP packets with frames.
         '''
+        self.time_end = time.time()
         if (self.state != 'PLAYING'):
             return
         self.cseq += 1
         self.msg = 'PAUSE ' + self.session.video_name + ' RTSP/1.0'
         self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
         self.send_request(self.msg.encode())
-        print("state = READY")
         self.state = 'READY'
-
+        rate = self.num_pkts/(self.time_end - self.time_start)
+        print("FRAME RATE: ", rate)
+        print("LOSS RATE: ", self.num_pkts/self.sq)
         # TODO
 
     def teardown(self):
@@ -197,7 +203,6 @@ class Connection:
         self.msg = 'TEARDOWN ' + self.session.video_name + ' RTSP/1.0'
         self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
         self.send_request(self.msg.encode())
-        print("state = INIT")
         self.state = 'INIT'
         self.cseq = 1 
         self.rtpsocket.close()
@@ -217,7 +222,6 @@ class Connection:
     def process_recvd_msg(self):
         chunk = self.sock.recv(1024)
         msgbuff = io.StringIO(chunk.decode("utf-8"))
-        print(chunk)
         response = Response(msgbuff)
         print("cseq", self.cseq)
         print("response.cseq", response.cseq)
