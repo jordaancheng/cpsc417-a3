@@ -4,21 +4,21 @@ Describe in general words the observed behaviour of each of these servers and
 how it affects the video playback experience. Then explain what you believe is
 happening and what is causing the described behaviour.
 
-* FUNKY A:
+* FUNKY A: The video is not as good quality
 
-* FUNKY B:
+* FUNKY B: The video quality is  worse and the video also lags
 
-* FUNKY C:
+* FUNKY C: The video both lags and is also accelerated sometimes
 
-* FUNKY D:
+* FUNKY D: The vide lags alot and also some frames also seem to be skiped 
 
-* FUNKY E:
+* FUNKY E: The video seems fast forwarded 
 
-* FUNKY F:
+* FUNKY F: the video is very slow
 
-* FUNKY G:
+* FUNKY G: the video is very slow and also laggy
 
-* FUNKY H:
+* FUNKY H: the video is slow and then laggy also normal sometimes
 
 
 ## Statistics
@@ -45,9 +45,9 @@ Explain in a few words what you believe is actually happening based on the stati
 
 * FUNKY B: more of the frames are missing and the delays are consistent with the missing frames
 
-* FUNKY C: packets missing and coming out of order and packets do not arrive on 40 ms delays
+* FUNKY C: packets missing and coming out of order and packets do not arrive on 40 ms intervals
 
-* FUNKY D: packets missing and coming out of order and packets do not arrive on 40 ms delays
+* FUNKY D: packets missing and coming out of order and packets do not arrive on 40 ms intervals
 
 * FUNKY E:
 
