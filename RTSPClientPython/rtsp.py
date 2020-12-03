@@ -73,9 +73,9 @@ class Connection:
 
     def process_pkt(self):
         dummy_item = Packet(-2, -2, -2, -2, -2)
-        while(True):
+        while(not self.end_rtp_conn):
             time.sleep(0.04)
-            while(True):
+            while(not self.end_rtp_conn):
                 self.packet_queue.sort(key=lambda x: x.sq)
                 try:
                     item = self.packet_queue.pop(0)
@@ -196,11 +196,15 @@ class Connection:
         if (self.state != 'READY'):
             return
         self.end_rtp_conn = False
-        self.start_rtp_timer()
         self.cseq += 1
+        print("SENDING PLAY MESSAGE")
         self.msg = 'PLAY ' + self.session.video_name + ' RTSP/1.0'
         self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
         self.send_request(self.msg.encode())
+        response = self.process_recvd_msg()
+        if(response is None):
+            return
+        self.start_rtp_timer()
         self.state = 'PLAYING'
         # TODO
 
@@ -218,6 +222,10 @@ class Connection:
         self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
         self.send_request(self.msg.encode())
         self.state = 'READY'
+        response = self.process_recvd_msg()
+        if(response is None):
+            return
+        self.end_rtp_conn = True
         rate = self.num_pkts/(self.time_end - self.time_start)
         print("FRAME RATE: ", rate)
         print("LOSS RATE: ", self.num_pkts/self.sq)
@@ -239,10 +247,16 @@ class Connection:
         self.msg = 'TEARDOWN ' + self.session.video_name + ' RTSP/1.0'
         self.msg += '\n' + 'CSeq: ' + str(self.cseq) + '\n' + 'Session: ' + str(self.session_id) + '\n\n' 
         self.send_request(self.msg.encode())
-        self.state = 'INIT'
-        self.cseq = 1 
+        response = self.process_recvd_msg()
+        if(response is None):
+            return
         self.rtpsocket.close()
+        self.state = 'INIT'
+        self.session_id = None
         self.end_rtp_conn = True
+        self.sq = 0
+        self._max_sq = -1
+        self.packet_queue = []
         # TODO
 
     def close(self):
@@ -250,8 +264,10 @@ class Connection:
 	close any open resource associated to this connection, such as
 	the RTP connection, if it is still open.
         '''
-        self.sock.close()
+        self.cseq = 1
         self.rtpsocket.close()
+        self.sock.close()
+        self.state = 'INIT'
         self.end_rtp_conn = True
         # TODO
 
