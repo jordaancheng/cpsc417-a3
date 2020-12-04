@@ -63,12 +63,10 @@ class Connection:
         addrr = str(address[0])
         port = int(address[1])
         self.sock.connect((addrr, port))
-        # self.rtpsocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.end_rtp_conn = False
         self.sq = 0
         self._max_sq = -1
         self.packet_queue = []
-        # self.sock.connect
         # TODO
 
     def process_pkt(self):
@@ -91,19 +89,15 @@ class Connection:
         _thread.start_new_thread( self.process_pkt, ( ) )
         prev_time = self.time_start
         time_lapsed = 0
-        print("listen_rtp")
         while(not self.end_rtp_conn):
-            # print("LISTENING ON: ", self.rtpsocket.getsockname()[1])
             try:
                 data = self.rtpsocket.recv(Connection.BUFFER_LENGTH)
                 time_lapsed = time.time()-prev_time
                 # print("tmp_lapsed: ", (time.time()-prev_time)*1000)
                 prev_time = time.time()
+                self.process_rtp_msg(data)
             except:
-                pass
-            # if (time_lapsed > 0.04):
-            #     time.sleep(time_lapsed - 0.04)
-            self.process_rtp_msg(data)
+                print("Error: An exception occurred in listen_rtp()")
 
     def process_rtp_msg(self, packet): 
         self.num_pkts += 1
@@ -118,8 +112,6 @@ class Connection:
         packet = Packet(pt, m, sq, tmp_stamp, payload)
         self.packet_queue.append(packet)
         self.sq = sq
-        # print("tmp_stamp: ", tmp_stamp)
-        ##self.session.process_frame(pt, m, sq, tmp_stamp, payload)
         
     def send_request(self, command, include_session=True, extra_headers=None):
         '''Helper function that generates an RTSP request and sends it to the
