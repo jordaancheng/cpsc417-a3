@@ -59,7 +59,6 @@ class Connection:
         self.cseq = 0
         self.session = session
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print(address[0], address[1], "\n")
         addrr = str(address[0])
         port = int(address[1])
         self.sock.connect((addrr, port))
@@ -75,7 +74,7 @@ class Connection:
     def process_pkt(self):
         '''This thread will process packets in queue in 40 ms intervals
         this new thread is to remedy the problems caused by the 
-        funky server such as burst of packets arriving and out of order packets'''
+        funky server such as burst of packets arriving and out of order packets.'''
         dummy_item = Packet(-2, -2, -2, -2, -2)
         while(not self.end_rtp_conn):
             time.sleep(0.04)
@@ -91,7 +90,7 @@ class Connection:
                     break
 
     def listen_rtp(self):
-        '''This thread listens for packes on the rtp socket and process them'''
+        '''This thread listens for packets on the rtp socket and process them.'''
         prev_time = self.time_start
         time_lapsed = 0
         while(not self.end_rtp_conn):
@@ -103,8 +102,8 @@ class Connection:
             except:
                 print("Error: An exception occurred in listen_rtp()")
 
-    def process_rtp_msg(self, packet): 
-        # retrieves the needed info from the packet
+    def process_rtp_msg(self, packet):
+        '''Retrieves the needed information from the packet.'''
         self.num_pkts += 1
         cc = 0b00001111 & packet[0]
         m = 0b10000000 & packet[1]
@@ -128,6 +127,7 @@ class Connection:
             msg += 'Session: ' + str(self.session_id) + '\n\n'
         elif (extra_headers is not None):
             msg += extra_headers
+        print(msg)
         msg = msg.encode()
         sent = self.sock.send(msg)
         if sent == 0:
@@ -151,9 +151,9 @@ class Connection:
         # TODO
 
     def stop_rtp_timer(self):
+        '''Stops the thread that reads RTP packets'''
         self.end_rtp_conn = True
         self.time_end = time.time()
-        '''Stops the thread that reads RTP packets'''
         # TODO
 
     def setup(self):
@@ -177,6 +177,7 @@ class Connection:
         self.rtpsocket.bind(('localhost', 0))
         self.client_port = self.rtpsocket.getsockname()[1]
 
+        # send SETUP message
         header = 'Transport: RTP/UDP; client_port= '+ str(self.client_port) + '\n\n'
         self.send_request('SETUP', False, header)
         
@@ -200,7 +201,8 @@ class Connection:
         if (self.state != 'READY'):
             return
         self.cseq += 1
-        # print & send PLAY message
+
+        # send PLAY message
         self.send_request('PLAY', True)
 
         # receive & print server PLAY reply
@@ -219,13 +221,12 @@ class Connection:
 	successful response, cancelling the RTP thread responsible for
 	receiving RTP packets with frames.
         '''
-        
+
         if (self.state != 'PLAYING'):
             return
         self.cseq += 1
 
-        # print & send PAUSE message
-        print(self.msg)
+        # send PAUSE message
         self.send_request('PAUSE', True)
 
         # receive & print server PAUSE reply
@@ -233,6 +234,7 @@ class Connection:
         if(response is None):
             return
         self.print_server_reply(response)
+
         self.stop_rtp_timer()
         self.state = 'READY'
         rate = self.num_pkts/(self.time_end - self.time_start)
@@ -254,9 +256,10 @@ class Connection:
             return
         self.cseq += 1
 
-        # print & send TEARDOWN message
-        # receive & print server PAUSE reply
+        # send TEARDOWN message
         self.send_request('TEARDOWN', True)
+
+        # receive & print server PAUSE reply
         response = self.process_received_msg()
         if(response is None):
             return
@@ -284,6 +287,7 @@ class Connection:
         # TODO
 
     def process_received_msg(self):
+        '''Processes and returns the response from RTSP server'''
         chunk = self.sock.recv(1024)
         msgbuff = io.StringIO(chunk.decode("utf-8"))
         response = Response(msgbuff)
@@ -299,7 +303,7 @@ class Connection:
     def print_server_reply(self, response):
         server_reply = "%s %d %s" % (response.version, response.response_code, response.message)
         server_reply += "CSeq: %d\n" % response.cseq
-        server_reply += "Session %d" % response.session_id
+        server_reply += "Session %d\n" % response.session_id
         print(server_reply)
 
 
