@@ -128,15 +128,10 @@ class Connection:
             msg += 'Session: ' + str(self.session_id) + '\n\n'
         elif (extra_headers is not None):
             msg += extra_headers
-        totalsent = 0
         msg = msg.encode()
-        MSGLEN = len(msg)
-        while totalsent < MSGLEN:
-            sent = self.sock.send(msg[totalsent:])
-            if sent == 0:
-                raise RuntimeError("socket connection broken")
-            totalsent = totalsent + sent
-        # TODO
+        sent = self.sock.send(msg)
+        if sent == 0:
+            raise RuntimeError("socket connection broken")
 
     def start_rtp_timer(self):
         '''Starts a thread that reads RTP packets repeatedly and process the
