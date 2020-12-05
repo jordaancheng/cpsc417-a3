@@ -67,9 +67,15 @@ class Connection:
         self.sq = 0
         self._max_sq = -1
         self.packet_queue = []
+        self.thread_listening = None
+        self.thread_processing = None
+
         # TODO
 
     def process_pkt(self):
+        '''This thread will process packets in queue in 40 ms intervals
+        this new thread is to remedy the problems caused by the 
+        funky server such as burst of packets arriving and out of order packets'''
         dummy_item = Packet(-2, -2, -2, -2, -2)
         while(not self.end_rtp_conn):
             time.sleep(0.04)
@@ -82,24 +88,23 @@ class Connection:
                 if (item.sq > self._max_sq):
                     self._max_sq = item.sq
                     self.session.process_frame(item.pt, item.m, item.sq, item.tmp_stamp, item.payload)
-                    # print("-->", item.sq)
                     break
 
-    def listen_rtp(self, port):
-        _thread.start_new_thread( self.process_pkt, ( ) )
+    def listen_rtp(self):
+        '''This thread listens for packes on the rtp socket and process them'''
         prev_time = self.time_start
         time_lapsed = 0
         while(not self.end_rtp_conn):
             try:
                 data = self.rtpsocket.recv(Connection.BUFFER_LENGTH)
                 time_lapsed = time.time()-prev_time
-                # print("tmp_lapsed: ", (time.time()-prev_time)*1000)
                 prev_time = time.time()
                 self.process_rtp_msg(data)
             except:
                 print("Error: An exception occurred in listen_rtp()")
 
     def process_rtp_msg(self, packet): 
+        # retrieves the needed info from the packet
         self.num_pkts += 1
         cc = 0b00001111 & packet[0]
         m = 0b10000000 & packet[1]
@@ -117,10 +122,17 @@ class Connection:
         '''Helper function that generates an RTSP request and sends it to the
         RTSP connection.
         '''
+        msg = command + ' ' + self.session.video_name + ' ' + 'RTSP/1.0\n'
+        msg += 'CSeq: ' + str(self.cseq) + '\n'
+        if (include_session):
+            msg += 'Session: ' + str(self.session_id) + '\n\n'
+        elif (extra_headers is not None):
+            msg += extra_headers
         totalsent = 0
-        MSGLEN = len(command)
+        msg = msg.encode()
+        MSGLEN = len(msg)
         while totalsent < MSGLEN:
-            sent = self.sock.send(command[totalsent:])
+            sent = self.sock.send(msg[totalsent:])
             if sent == 0:
                 raise RuntimeError("socket connection broken")
             totalsent = totalsent + sent
@@ -135,11 +147,17 @@ class Connection:
 	the resulting data. In case of timeout no exception should be
 	thrown.
         '''
-        _thread.start_new_thread( self.listen_rtp, (self.client_port, ) )
-        print("END OF THREAD")
+        self.end_rtp_conn = False
+        self.time_start = time.time()
+        self.thread_listening = Thread(target=self.listen_rtp, args=())
+        self.thread_processing = Thread(target=self.process_pkt, args=())
+        self.thread_listening.start()
+        self.thread_processing.start()
         # TODO
 
     def stop_rtp_timer(self):
+        self.end_rtp_conn = True
+        self.time_end = time.time()
         '''Stops the thread that reads RTP packets'''
         # TODO
 
@@ -164,12 +182,8 @@ class Connection:
         self.rtpsocket.bind(('localhost', 0))
         self.client_port = self.rtpsocket.getsockname()[1]
 
-        # print & send SETUP message
-        self.msg = 'SETUP %s RTSP/1.0\n' % self.session.video_name
-        self.msg += 'CSeq: %s\n' % str(self.cseq)
-        self.msg += 'Transport: RTP/UDP; client_port= %s\n\n' % str(self.client_port) 
-        print(self.msg)
-        self.send_request(self.msg.encode())
+        header = 'Transport: RTP/UDP; client_port= '+ str(self.client_port) + '\n\n'
+        self.send_request('SETUP', False, header)
         
         # receive & print server SETUP reply
         response = self.process_received_msg()
@@ -188,18 +202,11 @@ class Connection:
 	successful response, starting the RTP timer responsible for
 	receiving RTP packets with frames.
         '''
-        self.time_start = time.time()
         if (self.state != 'READY'):
             return
         self.cseq += 1
-        self.end_rtp_conn = False
-
         # print & send PLAY message
-        self.msg = 'PLAY %s RTSP/1.0\n' % self.session.video_name
-        self.msg += 'CSeq: %s\n' % str(self.cseq)
-        self.msg += 'Session: %s\n\n' % str(self.session_id) 
-        print(self.msg)
-        self.send_request(self.msg.encode())
+        self.send_request('PLAY', True)
 
         # receive & print server PLAY reply
         response = self.process_received_msg()
@@ -217,25 +224,21 @@ class Connection:
 	successful response, cancelling the RTP thread responsible for
 	receiving RTP packets with frames.
         '''
-        self.time_end = time.time()
+        
         if (self.state != 'PLAYING'):
             return
         self.cseq += 1
 
         # print & send PAUSE message
-        self.msg = 'PAUSE %s RTSP/1.0\n' % self.session.video_name
-        self.msg += 'CSeq: %s\n' % str(self.cseq)
-        self.msg += 'Session: %s\n\n' % str(self.session_id) 
         print(self.msg)
-        self.send_request(self.msg.encode())
+        self.send_request('PAUSE', True)
 
         # receive & print server PAUSE reply
         response = self.process_received_msg()
         if(response is None):
             return
         self.print_server_reply(response)
-
-        self.end_rtp_conn = True
+        self.stop_rtp_timer()
         self.state = 'READY'
         rate = self.num_pkts/(self.time_end - self.time_start)
         print("FRAME RATE: ", rate)
@@ -257,13 +260,8 @@ class Connection:
         self.cseq += 1
 
         # print & send TEARDOWN message
-        self.msg = 'TEARDOWN %s RTSP/1.0\n' % self.session.video_name
-        self.msg += 'CSeq: %s\n' % str(self.cseq)
-        self.msg += 'Session: %s\n\n' % str(self.session_id) 
-        print(self.msg)
-
         # receive & print server PAUSE reply
-        self.send_request(self.msg.encode())
+        self.send_request('TEARDOWN', True)
         response = self.process_received_msg()
         if(response is None):
             return
@@ -272,7 +270,7 @@ class Connection:
         self.rtpsocket.close()
         self.state = 'INIT'
         self.session_id = None
-        self.end_rtp_conn = True
+        self.stop_rtp_timer()
         self.sq = 0
         self._max_sq = -1
         self.packet_queue = []
@@ -287,7 +285,7 @@ class Connection:
         self.rtpsocket.close()
         self.sock.close()
         self.state = 'INIT'
-        self.end_rtp_conn = True
+        self.stop_rtp_timer()
         # TODO
 
     def process_received_msg(self):
